@@ -7,6 +7,7 @@ import SheetMusicNote from "./SheetMusicNote";
 import {
   frequencyToMidi,
   midiToNoteName,
+  midiToFrequency,
   NoteStabilityVoter,
   randomTargetNote,
 } from "./pitch";
@@ -59,12 +60,18 @@ function App() {
   const audioBufferRef = useRef<Float32Array | null>(null);
   const targetNoteRef = useRef<number>(targetNote);
   const octaveRangeRef = useRef<OctaveRange>(DEFAULT_OCTAVE_RANGE);
+  const playbackContextRef = useRef<AudioContext | null>(null);
+  const playbackTimeoutRef = useRef<number | null>(null);
+  const [isPlayingTarget, setIsPlayingTarget] = useState(false);
+  const isFirstTargetRef = useRef(true);
+  const hasUserGestureRef = useRef(false);
 
   /**
    * Start microphone capture and pitch detection loop
    */
   const startMicrophone = async () => {
     try {
+      hasUserGestureRef.current = true;
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -275,12 +282,101 @@ function App() {
     voterRef.current.reset();
   };
 
+  const playTargetNote = async () => {
+    try {
+      hasUserGestureRef.current = true;
+      const AudioContextClass =
+        window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        throw new Error("AudioContext not supported");
+      }
+
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContextClass();
+      }
+
+      const audioContext = playbackContextRef.current;
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+
+      const frequency = midiToFrequency(targetNoteRef.current);
+      if (!frequency) return;
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      const filterNode = audioContext.createBiquadFilter();
+      const now = audioContext.currentTime;
+
+      const harmonics = [1, 0.6, 0.35, 0.2, 0.1];
+      const real = new Float32Array(harmonics.length);
+      const imag = new Float32Array(harmonics.length);
+      harmonics.forEach((amp, index) => {
+        real[index] = index === 0 ? 0 : amp;
+        imag[index] = 0;
+      });
+      const wave = audioContext.createPeriodicWave(real, imag, {
+        disableNormalization: false,
+      });
+      oscillator.setPeriodicWave(wave);
+      oscillator.frequency.setValueAtTime(frequency, now);
+
+      filterNode.type = "lowpass";
+      filterNode.frequency.setValueAtTime(6500, now);
+      filterNode.Q.setValueAtTime(0.7, now);
+
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.5, now + 0.015);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 1.1);
+
+      oscillator.connect(filterNode);
+      filterNode.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      setIsPlayingTarget(true);
+      oscillator.start(now);
+      oscillator.stop(now + 1.15);
+
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        filterNode.disconnect();
+        gainNode.disconnect();
+      };
+
+      if (playbackTimeoutRef.current) {
+        clearTimeout(playbackTimeoutRef.current);
+      }
+      playbackTimeoutRef.current = window.setTimeout(() => {
+        setIsPlayingTarget(false);
+      }, 1150);
+    } catch (error) {
+      console.error("Error playing target note:", error);
+    }
+  };
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopMicrophone();
+      if (playbackTimeoutRef.current) {
+        clearTimeout(playbackTimeoutRef.current);
+        playbackTimeoutRef.current = null;
+      }
+      if (playbackContextRef.current) {
+        playbackContextRef.current.close().catch(console.error);
+        playbackContextRef.current = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (isFirstTargetRef.current) {
+      isFirstTargetRef.current = false;
+      return;
+    }
+    if (!hasUserGestureRef.current) return;
+    playTargetNote();
+  }, [targetNote]);
 
   // Get status text
   const getStatusText = (): string => {
@@ -349,6 +445,16 @@ function App() {
               <p className="eyebrow">Target</p>
               <div className="big-note">{midiToNoteName(targetNote)}</div>
               <p className="note-caption">Aim for a centered tone.</p>
+              <div className="target-actions">
+                <button
+                  className="button button-tone"
+                  type="button"
+                  onClick={playTargetNote}
+                  disabled={isPlayingTarget}
+                >
+                  {isPlayingTarget ? "Playing target..." : "Play target note"}
+                </button>
+              </div>
             </div>
 
             <div className="board-detected">

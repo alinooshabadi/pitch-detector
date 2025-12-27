@@ -27,6 +27,15 @@ export function midiToNoteName(midi: number): string {
 }
 
 /**
+ * Convert MIDI note number to frequency (Hz)
+ * Formula: freq = 440 * 2^((midi - 69) / 12)
+ */
+export function midiToFrequency(midi: number): number {
+  if (midi < 0 || midi > 127) return 0;
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+/**
  * Convert frequency directly to note name
  */
 export function frequencyToNoteName(freq: number): string {
@@ -113,4 +122,3 @@ export function randomTargetNote(octaveRange = { start: 2, end: 5 }): number {
   const endMidi = (octaveRange.end + 1) * 12 + 11;
   return Math.floor(Math.random() * (endMidi - startMidi + 1)) + startMidi;
 }
-
