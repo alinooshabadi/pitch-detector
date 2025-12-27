@@ -63,7 +63,6 @@ function App() {
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackTimeoutRef = useRef<number | null>(null);
   const [isPlayingTarget, setIsPlayingTarget] = useState(false);
-  const isFirstTargetRef = useRef(true);
   const hasUserGestureRef = useRef(false);
 
   /**
@@ -369,14 +368,6 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (isFirstTargetRef.current) {
-      isFirstTargetRef.current = false;
-      return;
-    }
-    if (!hasUserGestureRef.current) return;
-    playTargetNote();
-  }, [targetNote]);
 
   // Get status text
   const getStatusText = (): string => {
