@@ -6,7 +6,7 @@
   background: transparent;
   border: none;
   box-shadow: none;
-  color: #1f1b16;
+  color: rgba(247, 243, 255, 0.85);
   display: flex;
   justify-content: center;
 }

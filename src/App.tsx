@@ -1,6 +1,12 @@
 // @ts-expect-error - aubiojs ESM build doesn't have type definitions
 import aubio from "aubiojs/build/aubio.esm.js";
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type CSSProperties,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import "./App.css";
 import PianoKeys from "./PianoKeys";
 import SheetMusicNote from "./SheetMusicNote";
@@ -21,15 +27,19 @@ declare global {
 
 type Status = "idle" | "listening" | "no-pitch" | "correct" | "try-again";
 type OctaveRange = { start: number; end: number };
-type OctaveSelection = "all" | "2" | "3" | "4" | "5";
+type RingDirection = "neutral" | "flat" | "sharp" | "perfect";
+type ReferenceTone = "sine" | "piano" | "off";
 
-const DEFAULT_OCTAVE_RANGE: OctaveRange = { start: 2, end: 5 };
-
-const selectionToRange = (selection: OctaveSelection): OctaveRange => {
-  if (selection === "all") return DEFAULT_OCTAVE_RANGE;
-  const octave = Number(selection);
-  return { start: octave, end: octave };
+const DEFAULT_OCTAVE = 4;
+const DEFAULT_OCTAVE_RANGE: OctaveRange = {
+  start: DEFAULT_OCTAVE,
+  end: DEFAULT_OCTAVE,
 };
+const PERFECT_CENTS = 10;
+const HOLD_DURATION_MS = 1200;
+const WAVE_SPEED_DEFAULT = 8;
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
 
 // Type definition for aubiojs Pitch class
 interface AubioPitch {
@@ -39,11 +49,18 @@ interface AubioPitch {
 function App() {
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
-  const [octaveSelection, setOctaveSelection] =
-    useState<OctaveSelection>("all");
-  const [octaveRange, setOctaveRange] = useState<OctaveRange>(
-    DEFAULT_OCTAVE_RANGE
+  const [ringDirection, setRingDirection] =
+    useState<RingDirection>("neutral");
+  const [lockProgress, setLockProgress] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [waveSpeed, setWaveSpeed] = useState(WAVE_SPEED_DEFAULT);
+  const [centsOffset, setCentsOffset] = useState<number | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [octaveSelection, setOctaveSelection] = useState(
+    String(DEFAULT_OCTAVE)
   );
+  const [referenceTone, setReferenceTone] =
+    useState<ReferenceTone>("piano");
   const [targetNote, setTargetNote] = useState<number>(() =>
     randomTargetNote(DEFAULT_OCTAVE_RANGE)
   );
@@ -60,10 +77,17 @@ function App() {
   const audioBufferRef = useRef<Float32Array | null>(null);
   const targetNoteRef = useRef<number>(targetNote);
   const octaveRangeRef = useRef<OctaveRange>(DEFAULT_OCTAVE_RANGE);
+  const lockStartRef = useRef<number | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackTimeoutRef = useRef<number | null>(null);
   const [isPlayingTarget, setIsPlayingTarget] = useState(false);
   const hasUserGestureRef = useRef(false);
+
+  const resetLock = () => {
+    lockStartRef.current = null;
+    setLockProgress((prev) => (prev === 0 ? prev : 0));
+    setIsLocked((prev) => (prev ? false : prev));
+  };
 
   /**
    * Start microphone capture and pitch detection loop
@@ -71,6 +95,10 @@ function App() {
   const startMicrophone = async () => {
     try {
       hasUserGestureRef.current = true;
+      setRingDirection("neutral");
+      resetLock();
+      setWaveSpeed(WAVE_SPEED_DEFAULT);
+      setCentsOffset(null);
       // Request microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
@@ -156,6 +184,44 @@ function App() {
         const frequency = pitchDetectorRef.current.do(audioData as any);
 
         if (frequency && frequency > 0) {
+          const now = performance.now();
+          const targetFrequency = midiToFrequency(targetNoteRef.current);
+          const centsOff =
+            targetFrequency > 0
+              ? 1200 * Math.log2(frequency / targetFrequency)
+              : Number.NaN;
+          let nextDirection: RingDirection = "neutral";
+          if (Number.isFinite(centsOff)) {
+            if (Math.abs(centsOff) <= PERFECT_CENTS) {
+              nextDirection = "perfect";
+            } else {
+              nextDirection = centsOff < 0 ? "flat" : "sharp";
+            }
+          }
+          if (correctTimeoutRef.current === null) {
+            setRingDirection((prev) =>
+              prev === nextDirection ? prev : nextDirection
+            );
+
+            if (Number.isFinite(centsOff)) {
+              const nextWaveSpeed = clamp(
+                WAVE_SPEED_DEFAULT - (centsOff / 100) * 2,
+                4,
+                10
+              );
+              setWaveSpeed((prev) =>
+                Math.abs(prev - nextWaveSpeed) < 0.2 ? prev : nextWaveSpeed
+              );
+              setCentsOffset((prev) =>
+                prev !== null && Math.abs(prev - centsOff) < 0.5
+                  ? prev
+                  : centsOff
+              );
+            } else {
+              setCentsOffset((prev) => (prev === null ? prev : null));
+            }
+          }
+
           // Convert to MIDI note
           const midi = frequencyToMidi(frequency);
 
@@ -168,40 +234,67 @@ function App() {
             setDetectedNote(noteName);
 
             // Check if it matches target (use ref to get current value)
-            if (stableNote === targetNoteRef.current) {
-              // Only trigger correct feedback if we're not already waiting to move to next note
-              // This prevents resetting the timeout while waiting
-              if (correctTimeoutRef.current === null) {
-                setStatus("correct");
+            const isPerfect =
+              Number.isFinite(centsOff) &&
+              Math.abs(centsOff) <= PERFECT_CENTS;
 
-                // Pick new target after 1500ms to give user time to see the feedback
-                correctTimeoutRef.current = window.setTimeout(() => {
-                  const newTarget = randomTargetNote(
-                    octaveRangeRef.current
-                  );
-                  setTargetNote(newTarget);
-                  targetNoteRef.current = newTarget; // Update ref as well
-                  voterRef.current.reset();
-                  setStatus("listening");
-                  setDetectedNote("");
-                  correctTimeoutRef.current = null; // Clear the ref after timeout fires
-                }, 1500);
-              }
-            } else {
-              // Only update status if we're not waiting to move to next note
-              // This prevents overwriting the correct feedback
-              if (correctTimeoutRef.current === null) {
+            const isStableMatch =
+              stableNote === targetNoteRef.current && isPerfect;
+
+            if (correctTimeoutRef.current === null) {
+              if (isStableMatch) {
+                if (lockStartRef.current === null) {
+                  lockStartRef.current = now;
+                }
+                setStatus((prev) => (prev === "listening" ? prev : "listening"));
+                const progress = Math.min(
+                  (now - lockStartRef.current) / HOLD_DURATION_MS,
+                  1
+                );
+                setLockProgress((prev) =>
+                  Math.abs(prev - progress) < 0.01 ? prev : progress
+                );
+
+                if (progress >= 1 && !isLocked) {
+                  setIsLocked(true);
+                  setStatus("correct");
+                  setLockProgress(1);
+
+                  // Pick new target after 1500ms to give user time to see the feedback
+                  correctTimeoutRef.current = window.setTimeout(() => {
+                    const newTarget = randomTargetNote(
+                      octaveRangeRef.current
+                    );
+                    setTargetNote(newTarget);
+                    targetNoteRef.current = newTarget; // Update ref as well
+                    voterRef.current.reset();
+                    setStatus("listening");
+                    setDetectedNote("");
+                    setRingDirection("neutral");
+                    resetLock();
+                    setWaveSpeed(WAVE_SPEED_DEFAULT);
+                    setCentsOffset(null);
+                    correctTimeoutRef.current = null; // Clear the ref after timeout fires
+                  }, 1500);
+                }
+              } else {
+                resetLock();
                 setStatus("try-again");
               }
             }
           } else {
             // Not stable yet, but we have a pitch
+            resetLock();
             setStatus("listening");
           }
         } else {
           // No pitch detected
           setStatus("no-pitch");
           setDetectedNote("");
+          resetLock();
+          setRingDirection((prev) => (prev === "neutral" ? prev : "neutral"));
+          setWaveSpeed(WAVE_SPEED_DEFAULT);
+          setCentsOffset((prev) => (prev === null ? prev : null));
         }
 
         // Continue loop
@@ -222,11 +315,12 @@ function App() {
   };
 
   const handleOctaveChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const selection = event.target.value as OctaveSelection;
-    const range = selectionToRange(selection);
+    const selection = event.target.value;
+    const octave = Number(selection);
+    if (!Number.isFinite(octave)) return;
 
+    const range = { start: octave, end: octave };
     setOctaveSelection(selection);
-    setOctaveRange(range);
     octaveRangeRef.current = range;
 
     if (correctTimeoutRef.current) {
@@ -239,6 +333,10 @@ function App() {
     targetNoteRef.current = newTarget;
     voterRef.current.reset();
     setDetectedNote("");
+    setRingDirection("neutral");
+    resetLock();
+    setWaveSpeed(WAVE_SPEED_DEFAULT);
+    setCentsOffset(null);
     setStatus(isListening ? "listening" : "idle");
   };
 
@@ -278,12 +376,19 @@ function App() {
     setIsListening(false);
     setStatus("idle");
     setDetectedNote("");
+    setRingDirection("neutral");
+    resetLock();
+    setWaveSpeed(WAVE_SPEED_DEFAULT);
+    setCentsOffset(null);
     voterRef.current.reset();
   };
 
   const playTargetNote = async () => {
     try {
       hasUserGestureRef.current = true;
+      if (referenceTone === "off") {
+        return;
+      }
       const AudioContextClass =
         window.AudioContext || window.webkitAudioContext;
       if (!AudioContextClass) {
@@ -307,17 +412,21 @@ function App() {
       const filterNode = audioContext.createBiquadFilter();
       const now = audioContext.currentTime;
 
-      const harmonics = [1, 0.6, 0.35, 0.2, 0.1];
-      const real = new Float32Array(harmonics.length);
-      const imag = new Float32Array(harmonics.length);
-      harmonics.forEach((amp, index) => {
-        real[index] = index === 0 ? 0 : amp;
-        imag[index] = 0;
-      });
-      const wave = audioContext.createPeriodicWave(real, imag, {
-        disableNormalization: false,
-      });
-      oscillator.setPeriodicWave(wave);
+      if (referenceTone === "sine") {
+        oscillator.type = "sine";
+      } else {
+        const harmonics = [1, 0.6, 0.35, 0.2, 0.1];
+        const real = new Float32Array(harmonics.length);
+        const imag = new Float32Array(harmonics.length);
+        harmonics.forEach((amp, index) => {
+          real[index] = index === 0 ? 0 : amp;
+          imag[index] = 0;
+        });
+        const wave = audioContext.createPeriodicWave(real, imag, {
+          disableNormalization: false,
+        });
+        oscillator.setPeriodicWave(wave);
+      }
       oscillator.frequency.setValueAtTime(frequency, now);
 
       filterNode.type = "lowpass";
@@ -375,6 +484,9 @@ function App() {
       case "idle":
         return "Ready to start";
       case "listening":
+        if (lockProgress > 0 && lockProgress < 1) {
+          return "Hold steady...";
+        }
         return "Listening...";
       case "no-pitch":
         return "No pitch detected";
@@ -387,112 +499,214 @@ function App() {
     }
   };
 
+  const targetNoteName = midiToNoteName(targetNote);
+  const showDetectedNote = detectedNote.length > 0;
+  const isDetectedMatch =
+    showDetectedNote &&
+    detectedNote === targetNoteName &&
+    ringDirection === "perfect";
+  const showCentsMeter =
+    showDetectedNote && centsOffset !== null && Number.isFinite(centsOffset);
+  const centsShift = showCentsMeter
+    ? Math.round((clamp(centsOffset ?? 0, -50, 50) / 50) * 36)
+    : 0;
+  const detectedValue = showDetectedNote ? detectedNote : "--";
+
   return (
     <div className="app">
       <header className="app-header">
-        <div className="brand">
-          <div className="brand-line">
-            <h1 className="brand-mark">Pitch Atelier</h1>
-            <span className="brand-sep">•</span>
-            <span className="brand-sub">Real-time ear training studio</span>
-          </div>
+        <div className="brand-compact">
+          <span className="brand-name">Pitch Atelier</span>
+          <span
+            className={`mic-dot ${isListening ? "is-live" : ""}`}
+            aria-hidden="true"
+          />
+          <span className="sr-only">
+            {isListening ? "Microphone live" : "Microphone off"}
+          </span>
         </div>
         <div className="header-actions">
-          <div className={`session-status status-${status}`}>
-            <span className="session-dot" />
-            <span className="session-text">
-              {isListening ? "Mic live" : "Mic off"}
-            </span>
-          </div>
-          <div className="controls">
-            {!isListening ? (
-              <button onClick={startMicrophone} className="button button-start">
-                Start microphone
-              </button>
-            ) : (
-              <button onClick={stopMicrophone} className="button button-stop">
-                Stop
-              </button>
-            )}
-          </div>
+          {!isListening ? (
+            <button
+              onClick={startMicrophone}
+              className="glass-button glass-button--primary"
+            >
+              Start mic
+            </button>
+          ) : (
+            <button
+              onClick={stopMicrophone}
+              className="glass-button glass-button--danger"
+            >
+              Stop mic
+            </button>
+          )}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Open settings"
+            aria-expanded={isPanelOpen}
+            aria-controls="config-panel"
+            onClick={() => setIsPanelOpen(true)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 8.4a3.6 3.6 0 1 1 0 7.2 3.6 3.6 0 0 1 0-7.2Z"
+                fill="none"
+              />
+              <path
+                d="M4.5 12a7.5 7.5 0 0 1 .1-1.3l-2-1.6 2-3.4 2.4 1a7.7 7.7 0 0 1 2.2-1.3l.3-2.6h4l.3 2.6a7.7 7.7 0 0 1 2.2 1.3l2.4-1 2 3.4-2 1.6a7.5 7.5 0 0 1 0 2.6l2 1.6-2 3.4-2.4-1a7.7 7.7 0 0 1-2.2 1.3l-.3 2.6h-4l-.3-2.6a7.7 7.7 0 0 1-2.2-1.3l-2.4 1-2-3.4 2-1.6A7.5 7.5 0 0 1 4.5 12Z"
+                fill="none"
+              />
+            </svg>
+          </button>
         </div>
       </header>
 
-      <main className="studio">
-        <section className="studio-board">
-          <div className="board-header">
-            <div>
-              <p className="eyebrow">Session</p>
-              <div className="board-title-row">
-                <h2 className="board-title">Find the pitch</h2>
-                <span className="board-subtitle">
-                  Hold a steady tone for 1-2 seconds to lock the match.
-                </span>
-              </div>
-            </div>
-            <div className={`board-status status-${status}`}>
-              <span className="status-orb" />
-              <span>{getStatusText()}</span>
-            </div>
+      <div
+        className={`config-overlay ${isPanelOpen ? "is-open" : ""}`}
+        onClick={() => setIsPanelOpen(false)}
+        aria-hidden={!isPanelOpen}
+      />
+      <aside
+        id="config-panel"
+        className={`config-panel ${isPanelOpen ? "is-open" : ""}`}
+        aria-hidden={!isPanelOpen}
+      >
+        <div className="panel-header">
+          <h2 className="panel-title">Settings</h2>
+          <button
+            type="button"
+            className="icon-button icon-button--ghost"
+            aria-label="Close settings"
+            onClick={() => setIsPanelOpen(false)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6l-12 12" fill="none" />
+            </svg>
+          </button>
+        </div>
+        <div className="panel-section">
+          <label className="panel-label" htmlFor="octave-select">
+            Octave selection
+          </label>
+          <select
+            id="octave-select"
+            className="panel-select"
+            value={octaveSelection}
+            onChange={handleOctaveChange}
+          >
+            {Array.from({ length: 8 }, (_, index) => {
+              const octave = index + 1;
+              return (
+                <option key={octave} value={String(octave)}>
+                  Octave {octave}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+        <div className="panel-section">
+          <span className="panel-label">Reference tone</span>
+          <div className="tone-toggle" role="group" aria-label="Reference tone">
+            {(["sine", "piano", "off"] as const).map((tone) => (
+              <button
+                key={tone}
+                type="button"
+                className={`tone-option ${
+                  referenceTone === tone ? "is-active" : ""
+                }`}
+                aria-pressed={referenceTone === tone}
+                onClick={() => setReferenceTone(tone)}
+              >
+                {tone === "sine"
+                  ? "Sine"
+                  : tone === "piano"
+                    ? "Piano"
+                    : "Off"}
+              </button>
+            ))}
           </div>
+        </div>
+      </aside>
 
-          <div className="board-grid">
-            <div className="board-target">
-              <p className="eyebrow">Target</p>
-              <div className="big-note">{midiToNoteName(targetNote)}</div>
-              <p className="note-caption">Aim for a centered tone.</p>
-              <div className="target-actions">
-                <button
-                  className="button button-tone"
-                  type="button"
-                  onClick={playTargetNote}
-                  disabled={isPlayingTarget}
+      <main className="hero">
+        <div
+          className={`tuner-ring ${isLocked ? "is-locked" : ""}`}
+          data-direction={ringDirection}
+          style={
+            {
+              "--lock-progress": lockProgress,
+              "--wave-speed": `${waveSpeed}s`,
+            } as CSSProperties
+          }
+        >
+          <div className="ring-glow ring-left" aria-hidden="true" />
+          <div className="ring-glow ring-right" aria-hidden="true" />
+          <div className="ring-glow ring-full" aria-hidden="true" />
+          <div className="ring-lock" aria-hidden="true" />
+          <div className="ring-bloom" aria-hidden="true" />
+          <div className="ring-core">
+            <div className="note-wave" aria-hidden="true" />
+            <div className="note-stack">
+              <div className="target-note">{targetNoteName}</div>
+              <div
+                className={`detected-note ${isDetectedMatch ? "is-match" : ""}`}
+                data-visible={showDetectedNote}
+                aria-hidden={!showDetectedNote}
+              >
+                <span className="detected-label">Detected note</span>
+                <span className="detected-value">{detectedValue}</span>
+                <div
+                  className="cents-meter"
+                  data-direction={ringDirection}
+                  data-visible={showCentsMeter}
+                  style={
+                    {
+                      "--cents-shift": `${centsShift}px`,
+                    } as CSSProperties
+                  }
                 >
-                  {isPlayingTarget ? "Playing target..." : "Play target note"}
-                </button>
+                  <span className="cents-track" />
+                  <span className="cents-indicator" />
+                </div>
               </div>
-            </div>
-
-            <div className="board-detected">
-              <p className="eyebrow">Detected</p>
-              <div className="detected-big">{detectedNote || "--"}</div>
-              <p className="detected-caption">Closest stable pitch</p>
-            </div>
-
-            <div className="board-sheet">
-              <SheetMusicNote noteMidi={targetNote} />
             </div>
           </div>
-
-          <div className="board-keys">
-            <div className="keys-header">
-              <div className="keys-copy">
-                <h3>Keyboard reference</h3>
-                <p>Orient your ear with a quick visual map.</p>
-              </div>
-              <div className="keys-controls">
-                <span className="keys-meta">All octaves</span>
-                <label className="octave-label" htmlFor="octave-select">
-                  Practice octave
-                </label>
-                <select
-                  id="octave-select"
-                  className="octave-select"
-                  value={octaveSelection}
-                  onChange={handleOctaveChange}
-                >
-                  <option value="all">All (2-5)</option>
-                  <option value="2">Octave 2</option>
-                  <option value="3">Octave 3</option>
-                  <option value="4">Octave 4</option>
-                  <option value="5">Octave 5</option>
-                </select>
-              </div>
-            </div>
-            <PianoKeys highlightedNote={midiToNoteName(targetNote)} />
-          </div>
-        </section>
+        </div>
+        <p className="hero-caption">
+          Hold a steady tone to lock the match.
+        </p>
+        <div className="hero-staff">
+          <SheetMusicNote noteMidi={targetNote} scale={1.2} />
+        </div>
+        <div className="hero-actions">
+          <button
+            className="glass-button glass-button--primary"
+            type="button"
+            onClick={playTargetNote}
+            disabled={isPlayingTarget || referenceTone === "off"}
+          >
+            {referenceTone === "off"
+              ? "Reference tone off"
+              : isPlayingTarget
+                ? "Playing target..."
+                : "Play target note"}
+          </button>
+        </div>
+        <div className="hero-status" role="status" aria-live="polite">
+          {getStatusText()}
+        </div>
       </main>
+
+      <footer className="piano-footer">
+        <div className="piano-board">
+          <PianoKeys
+            highlightedNote={targetNoteName}
+            octaveRange={DEFAULT_OCTAVE_RANGE}
+          />
+        </div>
+      </footer>
     </div>
   );
 }

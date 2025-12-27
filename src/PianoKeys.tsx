@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { MidiNumbers, Piano } from "react-piano";
 import "react-piano/dist/styles.css";
 import "./PianoKeys.css";
@@ -19,31 +19,6 @@ const PianoKeys = ({
   highlightedNote,
   octaveRange = { start: 0, end: 8 },
 }: PianoKeysProps) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState<number>(0);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-
-    const updateWidth = () => {
-      const nextWidth = Math.floor(element.clientWidth);
-      setWidth((prev) => (Math.abs(prev - nextWidth) > 1 ? nextWidth : prev));
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => updateWidth());
-      observer.observe(element);
-      return () => observer.disconnect();
-    }
-
-    const onResize = () => updateWidth();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
   const firstNote = useMemo(
     () => MidiNumbers.fromNote(`c${octaveRange.start}`),
     [octaveRange.start]
@@ -60,18 +35,15 @@ const PianoKeys = ({
   }, [highlightedNote]);
 
   return (
-    <div className="piano-keys" ref={containerRef}>
-      {width > 0 && (
-        <Piano
-          noteRange={{ first: firstNote, last: lastNote }}
-          activeNotes={activeNotes}
-          playNote={() => {}}
-          stopNote={() => {}}
-          width={Math.max(320, width)}
-          keyWidthToHeight={0.3}
-          className="piano-highlight"
-        />
-      )}
+    <div className="piano-keys piano-keys--full">
+      <Piano
+        noteRange={{ first: firstNote, last: lastNote }}
+        activeNotes={activeNotes}
+        playNote={() => {}}
+        stopNote={() => {}}
+        keyWidthToHeight={0.32}
+        className="piano-highlight"
+      />
     </div>
   );
 };
