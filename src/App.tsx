@@ -400,8 +400,11 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="brand">
-          <h1 className="brand-mark">Pitch Atelier</h1>
-          <p className="brand-sub">Real-time ear training studio</p>
+          <div className="brand-line">
+            <h1 className="brand-mark">Pitch Atelier</h1>
+            <span className="brand-sep">•</span>
+            <span className="brand-sub">Real-time ear training studio</span>
+          </div>
         </div>
         <div className="header-actions">
           <div className={`session-status status-${status}`}>
@@ -429,10 +432,12 @@ function App() {
           <div className="board-header">
             <div>
               <p className="eyebrow">Session</p>
-              <h2 className="board-title">Find the pitch</h2>
-              <p className="board-subtitle">
-                Hold a steady tone for 1-2 seconds to lock the match.
-              </p>
+              <div className="board-title-row">
+                <h2 className="board-title">Find the pitch</h2>
+                <span className="board-subtitle">
+                  Hold a steady tone for 1-2 seconds to lock the match.
+                </span>
+              </div>
             </div>
             <div className={`board-status status-${status}`}>
               <span className="status-orb" />
