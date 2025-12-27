@@ -40,11 +40,20 @@ const buildMusicXml = (noteMidi: number): string => {
 <score-partwise version="3.1">
   <part-list>
     <score-part id="P1">
-      <part-name>Pitch</part-name>
+      <part-name></part-name>
+      <part-abbreviation></part-abbreviation>
     </score-part>
   </part-list>
   <part id="P1">
-    <measure number="1">
+    <measure number="1" width="360">
+      <print new-system="yes">
+        <system-layout>
+          <system-margins>
+            <left-margin>0</left-margin>
+            <right-margin>0</right-margin>
+          </system-margins>
+        </system-layout>
+      </print>
       <attributes>
         <divisions>1</divisions>
         <key>
@@ -95,6 +104,10 @@ const SheetMusicNote = ({ noteMidi, scale = 1.6 }: SheetMusicNoteProps) => {
       osmdRef.current = new OpenSheetMusicDisplay(container, {
         autoResize: true,
         drawTitle: false,
+        drawPartNames: false,
+        drawPartAbbreviations: false,
+        drawingParameters: "compact",
+        stretchLastSystemLine: true,
       });
     }
 
