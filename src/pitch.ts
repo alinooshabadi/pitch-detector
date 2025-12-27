@@ -106,11 +106,11 @@ export class NoteStabilityVoter {
 }
 
 /**
- * Generate a random MIDI note in the range C3 to C5 (48 to 72)
+ * Generate a random MIDI note within a given octave range.
  */
-export function randomTargetNote(): number {
-  // C3 = 48, C5 = 72 (inclusive)
-  return Math.floor(Math.random() * (72 - 48 + 1)) + 48;
+export function randomTargetNote(octaveRange = { start: 2, end: 5 }): number {
+  const startMidi = (octaveRange.start + 1) * 12;
+  const endMidi = (octaveRange.end + 1) * 12 + 11;
+  return Math.floor(Math.random() * (endMidi - startMidi + 1)) + startMidi;
 }
-
 

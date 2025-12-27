@@ -1,0 +1,24 @@
+.piano-keys {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #f1ece6);
+  box-shadow: inset 0 0 0 1px rgba(18, 16, 15, 0.08);
+  padding: 0.9rem 1.1rem;
+  overflow: hidden;
+}
+
+.piano-keys .ReactPiano__Keyboard {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.piano-highlight .ReactPiano__Key--active {
+  background: #0f8b7a;
+  border-color: #0f8b7a;
+}
+
+.piano-highlight .ReactPiano__Key--active.ReactPiano__Key--accidental {
+  border-top-color: #0f8b7a;
+}

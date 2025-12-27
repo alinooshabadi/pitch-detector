@@ -1,73 +1,74 @@
-# React + TypeScript + Vite
+# Pitch Detector
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A lightweight web app that displays a target musical note and listens through your microphone to tell you whether you're on pitch.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Real-time pitch detection with live feedback
+- Randomized target notes with octave selection
+- Visual piano keys and sheet-music target display
+- Stable detection via voting to reduce flicker
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React + TypeScript + Vite
+- Web Audio API for microphone input
+- aubiojs for pitch detection
+- react-piano and OpenSheetMusicDisplay for visuals
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Requirements
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js 18+ (or any modern Node that works with Vite)
+- A microphone-enabled browser (Chrome, Edge, or Safari)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Install
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Run Dev Server
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+Open the URL shown in the terminal (typically `http://localhost:5173`).
+
+### Build
+
+```bash
+npm run build
+```
+
+### Preview Production Build
+
+```bash
+npm run preview
+```
+
+### Lint
+
+```bash
+npm run lint
+```
+
+## Usage
+
+1. Click "Start microphone" and allow microphone access.
+2. Play or sing the target note.
+3. When you match the pitch, the target updates automatically.
+
+## How It Works
+
+The app captures microphone audio with the Web Audio API, detects pitch with aubiojs, and converts the detected frequency into a MIDI note number. A stability voter keeps the most recent detections and only accepts a note once it is consistent, which smooths out jitter. When a stable note matches the current target (default range C2–C5), the UI shows success and selects a new target after a short delay.
+
+## Contributing
+
+Issues and PRs are welcome. If you're planning a larger change, open an issue first so we can coordinate.
+
+## License
+
+No license has been specified yet. Add a `LICENSE` file to make the project explicitly open source.

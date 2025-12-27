@@ -1,0 +1,43 @@
+.sheet-music-wrapper {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #1f1b16;
+  display: flex;
+  justify-content: center;
+}
+
+.sheet-music {
+  width: 100%;
+  overflow: visible;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 160px;
+  padding: 0.5rem 1.4rem 0.9rem;
+}
+
+.sheet-music svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  overflow: visible;
+}
+
+.sheet-music svg text {
+  fill: currentColor;
+}
+
+.sheet-music svg path,
+.sheet-music svg line,
+.sheet-music svg rect,
+.sheet-music svg polygon,
+.sheet-music svg polyline {
+  stroke: currentColor;
+  fill: currentColor;
+}
