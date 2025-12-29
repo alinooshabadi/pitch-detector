@@ -4,7 +4,8 @@ A lightweight web app that displays a target musical note and listens through yo
 
 ## Screenshot
 
-![Pitch Detector screenshot](./public/screenshot.png)
+<img width="2776" height="1348" alt="image" src="https://github.com/user-attachments/assets/90c3b0b8-bc74-4c39-9558-89b460b03d77" />
+
 
 ## Features
 
