@@ -7,7 +7,7 @@ import {
   midiToFrequency,
   NoteStabilityVoter,
   randomTargetNote,
-} from "../pitch";
+} from "../utils/pitch";
 
 // Type declaration for webkitAudioContext fallback
 declare global {
@@ -63,8 +63,7 @@ export function usePitchDetection({
 }: UsePitchDetectionOptions): UsePitchDetectionResult {
   const [isListening, setIsListening] = useState(false);
   const [status, setStatus] = useState<PitchStatus>("idle");
-  const [ringDirection, setRingDirection] =
-    useState<RingDirection>("neutral");
+  const [ringDirection, setRingDirection] = useState<RingDirection>("neutral");
   const [lockProgress, setLockProgress] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [waveSpeed, setWaveSpeed] = useState(WAVE_SPEED_DEFAULT);
@@ -281,8 +280,7 @@ export function usePitchDetection({
 
             // Check if it matches target (use ref to get current value)
             const isPerfect =
-              Number.isFinite(centsOff) &&
-              Math.abs(centsOff) <= PERFECT_CENTS;
+              Number.isFinite(centsOff) && Math.abs(centsOff) <= PERFECT_CENTS;
 
             const isStableMatch =
               stableNote === targetNoteRef.current && isPerfect;
@@ -310,9 +308,7 @@ export function usePitchDetection({
 
                   // Pick new target after 1500ms to give user time to see the feedback
                   correctTimeoutRef.current = window.setTimeout(() => {
-                    const newTarget = randomTargetNote(
-                      octaveRangeRef.current
-                    );
+                    const newTarget = randomTargetNote(octaveRangeRef.current);
                     applyTargetChange(newTarget, "listening");
                     correctTimeoutRef.current = null;
                   }, 1500);

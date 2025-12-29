@@ -6,6 +6,10 @@ A lightweight web app that displays a target musical note and listens through yo
 
 <img width="2776" height="1348" alt="image" src="https://github.com/user-attachments/assets/90c3b0b8-bc74-4c39-9558-89b460b03d77" />
 
+## Demo
+
+Live demo: https://alinooshabadi.github.io/pitch-detector/
+
 
 ## Features
 
@@ -70,6 +74,24 @@ npm run lint
 
 The app captures microphone audio with the Web Audio API, detects pitch with aubiojs, and converts the detected frequency into a MIDI note number. A stability voter keeps the most recent detections and only accepts a note once it is consistent, which smooths out jitter. When a stable note matches the current target (default range C2–C5), the UI shows success and selects a new target after a short delay.
 
+## FAQ / Troubleshooting
+
+**Microphone permission prompt doesn't appear.**
+Make sure the site has mic access in your browser settings and that no other tab/app is using the microphone.
+
+**No pitch detected or unstable readings.**
+Try a quieter room, get closer to the mic, or use a more consistent tone (e.g., a tuner app or a sustained note).
+
+**Browser compatibility.**
+Works best in Chrome, Edge, and Safari. Some browsers or privacy settings may block audio input APIs.
+
+## Roadmap / Future Ideas
+
+- Alternate tunings and calibration (A4 reference)
+- Instrument-specific modes (voice, guitar, violin)
+- Practice modes (sustained note, interval training)
+- Visual note history and accuracy stats
+
 ## Contributing
 
 Issues and PRs are welcome. If you're planning a larger change, open an issue first so we can coordinate.
@@ -77,3 +99,9 @@ Issues and PRs are welcome. If you're planning a larger change, open an issue fi
 ## License
 
 No license has been specified yet. Add a `LICENSE` file to make the project explicitly open source.
+
+## Credits / Acknowledgments
+
+- [aubiojs](https://github.com/aubio/aubio) for pitch detection
+- [OpenSheetMusicDisplay](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay) for sheet music rendering
+- [react-piano](https://github.com/kevinsqi/react-piano) for the piano keyboard UI
