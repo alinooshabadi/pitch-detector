@@ -2,6 +2,10 @@
 
 A lightweight web app that displays a target musical note and listens through your microphone to tell you whether you're on pitch.
 
+## Screenshot
+
+![Pitch Detector screenshot](./public/screenshot.png)
+
 ## Features
 
 - Real-time pitch detection with live feedback

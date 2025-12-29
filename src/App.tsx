@@ -1,5 +1,3 @@
-// @ts-expect-error - aubiojs ESM build doesn't have type definitions
-import aubio from "aubiojs/build/aubio.esm.js";
 import {
   type ChangeEvent,
   type CSSProperties,
@@ -8,26 +6,15 @@ import {
   useState,
 } from "react";
 import "./App.css";
-import PianoKeys from "./PianoKeys";
-import SheetMusicNote from "./SheetMusicNote";
+import { type OctaveRange, usePitchDetection } from "./hooks/usePitchDetection";
+import PianoKeys from "./components/PianoKeys";
+import SheetMusicNote from "./components/SheetMusicNote";
 import {
-  frequencyToMidi,
-  midiToNoteName,
   midiToFrequency,
-  NoteStabilityVoter,
+  midiToNoteName,
   randomTargetNote,
-} from "./pitch";
+} from "./utils/pitch";
 
-// Type declaration for webkitAudioContext fallback
-declare global {
-  interface Window {
-    webkitAudioContext?: typeof AudioContext;
-  }
-}
-
-type Status = "idle" | "listening" | "no-pitch" | "correct" | "try-again";
-type OctaveRange = { start: number; end: number };
-type RingDirection = "neutral" | "flat" | "sharp" | "perfect";
 type ReferenceTone = "sine" | "piano" | "off";
 
 const DEFAULT_OCTAVE = 4;
@@ -35,284 +22,42 @@ const DEFAULT_OCTAVE_RANGE: OctaveRange = {
   start: DEFAULT_OCTAVE,
   end: DEFAULT_OCTAVE,
 };
-const PERFECT_CENTS = 10;
-const HOLD_DURATION_MS = 1200;
-const WAVE_SPEED_DEFAULT = 8;
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
-// Type definition for aubiojs Pitch class
-interface AubioPitch {
-  do(buffer: Float32Array<ArrayBufferLike> | Float32Array<ArrayBuffer>): number;
-}
-
 function App() {
-  const [isListening, setIsListening] = useState(false);
-  const [status, setStatus] = useState<Status>("idle");
-  const [ringDirection, setRingDirection] =
-    useState<RingDirection>("neutral");
-  const [lockProgress, setLockProgress] = useState(0);
-  const [isLocked, setIsLocked] = useState(false);
-  const [waveSpeed, setWaveSpeed] = useState(WAVE_SPEED_DEFAULT);
-  const [centsOffset, setCentsOffset] = useState<number | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [octaveSelection, setOctaveSelection] = useState(
     String(DEFAULT_OCTAVE)
   );
+  const [octaveRange, setOctaveRange] =
+    useState<OctaveRange>(DEFAULT_OCTAVE_RANGE);
   const [referenceTone, setReferenceTone] =
     useState<ReferenceTone>("piano");
   const [targetNote, setTargetNote] = useState<number>(() =>
     randomTargetNote(DEFAULT_OCTAVE_RANGE)
   );
-  const [detectedNote, setDetectedNote] = useState<string>("");
-
-  // Refs for audio processing (avoid re-renders)
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  const voterRef = useRef<NoteStabilityVoter>(new NoteStabilityVoter(10, 0.7));
-  const correctTimeoutRef = useRef<number | null>(null);
-  const pitchDetectorRef = useRef<AubioPitch | null>(null);
-  const audioBufferRef = useRef<Float32Array | null>(null);
-  const targetNoteRef = useRef<number>(targetNote);
-  const octaveRangeRef = useRef<OctaveRange>(DEFAULT_OCTAVE_RANGE);
-  const lockStartRef = useRef<number | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackTimeoutRef = useRef<number | null>(null);
   const [isPlayingTarget, setIsPlayingTarget] = useState(false);
-  const hasUserGestureRef = useRef(false);
 
-  const resetLock = () => {
-    lockStartRef.current = null;
-    setLockProgress((prev) => (prev === 0 ? prev : 0));
-    setIsLocked((prev) => (prev ? false : prev));
-  };
-
-  /**
-   * Start microphone capture and pitch detection loop
-   */
-  const startMicrophone = async () => {
-    try {
-      hasUserGestureRef.current = true;
-      setRingDirection("neutral");
-      resetLock();
-      setWaveSpeed(WAVE_SPEED_DEFAULT);
-      setCentsOffset(null);
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      // Create AudioContext (with fallback for webkit browsers)
-      const AudioContextClass =
-        window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
-        throw new Error("AudioContext not supported");
-      }
-      const audioContext = new AudioContextClass();
-      audioContextRef.current = audioContext;
-
-      // Get the actual sample rate from AudioContext
-      const actualSampleRate = audioContext.sampleRate;
-
-      // Reinitialize aubio with the correct sample rate if it doesn't match
-      if (!pitchDetectorRef.current) {
-        try {
-          const aubioModule = await aubio();
-          const { Pitch } = aubioModule;
-          const bufferSize = 2048;
-          const hopSize = 512;
-          pitchDetectorRef.current = new Pitch(
-            "default",
-            bufferSize,
-            hopSize,
-            actualSampleRate
-          );
-        } catch (aubioError) {
-          console.error("Error initializing aubiojs:", aubioError);
-          alert(
-            `Failed to initialize pitch detection library: ${
-              aubioError instanceof Error
-                ? aubioError.message
-                : String(aubioError)
-            }. Please check the browser console for details.`
-          );
-          setIsListening(false);
-          setStatus("idle");
-          return;
-        }
-      }
-
-      // Create analyser node
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserRef.current = analyser;
-
-      // Connect microphone to analyser
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      // Create audio buffer for aubio
-      const bufferSize = analyser.fftSize;
-      audioBufferRef.current = new Float32Array(bufferSize);
-
-      setIsListening(true);
-      setStatus("listening");
-      voterRef.current.reset();
-      targetNoteRef.current = targetNote; // Initialize ref with current target note
-
-      // Start pitch detection loop
-      const detectLoop = () => {
-        if (
-          !analyserRef.current ||
-          !pitchDetectorRef.current ||
-          !audioBufferRef.current
-        )
-          return;
-
-        // Get audio data
-        // @ts-expect-error - getFloatTimeDomainData accepts Float32Array regardless of underlying buffer type
-        analyserRef.current.getFloatTimeDomainData(audioBufferRef.current);
-
-        // Create a new Float32Array by copying the data to ensure proper type compatibility
-        const audioData = new Float32Array(Array.from(audioBufferRef.current));
-
-        // Detect pitch using aubiojs
-        // The do() method returns the frequency directly
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const frequency = pitchDetectorRef.current.do(audioData as any);
-
-        if (frequency && frequency > 0) {
-          const now = performance.now();
-          const targetFrequency = midiToFrequency(targetNoteRef.current);
-          const centsOff =
-            targetFrequency > 0
-              ? 1200 * Math.log2(frequency / targetFrequency)
-              : Number.NaN;
-          let nextDirection: RingDirection = "neutral";
-          if (Number.isFinite(centsOff)) {
-            if (Math.abs(centsOff) <= PERFECT_CENTS) {
-              nextDirection = "perfect";
-            } else {
-              nextDirection = centsOff < 0 ? "flat" : "sharp";
-            }
-          }
-          if (correctTimeoutRef.current === null) {
-            setRingDirection((prev) =>
-              prev === nextDirection ? prev : nextDirection
-            );
-
-            if (Number.isFinite(centsOff)) {
-              const nextWaveSpeed = clamp(
-                WAVE_SPEED_DEFAULT - (centsOff / 100) * 2,
-                4,
-                10
-              );
-              setWaveSpeed((prev) =>
-                Math.abs(prev - nextWaveSpeed) < 0.2 ? prev : nextWaveSpeed
-              );
-              setCentsOffset((prev) =>
-                prev !== null && Math.abs(prev - centsOff) < 0.5
-                  ? prev
-                  : centsOff
-              );
-            } else {
-              setCentsOffset((prev) => (prev === null ? prev : null));
-            }
-          }
-
-          // Convert to MIDI note
-          const midi = frequencyToMidi(frequency);
-
-          // Add to stability voter
-          const stableNote = voterRef.current.addDetection(midi);
-
-          if (stableNote !== null) {
-            // We have a stable note detection
-            const noteName = midiToNoteName(stableNote);
-            setDetectedNote(noteName);
-
-            // Check if it matches target (use ref to get current value)
-            const isPerfect =
-              Number.isFinite(centsOff) &&
-              Math.abs(centsOff) <= PERFECT_CENTS;
-
-            const isStableMatch =
-              stableNote === targetNoteRef.current && isPerfect;
-
-            if (correctTimeoutRef.current === null) {
-              if (isStableMatch) {
-                if (lockStartRef.current === null) {
-                  lockStartRef.current = now;
-                }
-                setStatus((prev) => (prev === "listening" ? prev : "listening"));
-                const progress = Math.min(
-                  (now - lockStartRef.current) / HOLD_DURATION_MS,
-                  1
-                );
-                setLockProgress((prev) =>
-                  Math.abs(prev - progress) < 0.01 ? prev : progress
-                );
-
-                if (progress >= 1 && !isLocked) {
-                  setIsLocked(true);
-                  setStatus("correct");
-                  setLockProgress(1);
-
-                  // Pick new target after 1500ms to give user time to see the feedback
-                  correctTimeoutRef.current = window.setTimeout(() => {
-                    const newTarget = randomTargetNote(
-                      octaveRangeRef.current
-                    );
-                    setTargetNote(newTarget);
-                    targetNoteRef.current = newTarget; // Update ref as well
-                    voterRef.current.reset();
-                    setStatus("listening");
-                    setDetectedNote("");
-                    setRingDirection("neutral");
-                    resetLock();
-                    setWaveSpeed(WAVE_SPEED_DEFAULT);
-                    setCentsOffset(null);
-                    correctTimeoutRef.current = null; // Clear the ref after timeout fires
-                  }, 1500);
-                }
-              } else {
-                resetLock();
-                setStatus("try-again");
-              }
-            }
-          } else {
-            // Not stable yet, but we have a pitch
-            resetLock();
-            setStatus("listening");
-          }
-        } else {
-          // No pitch detected
-          setStatus("no-pitch");
-          setDetectedNote("");
-          resetLock();
-          setRingDirection((prev) => (prev === "neutral" ? prev : "neutral"));
-          setWaveSpeed(WAVE_SPEED_DEFAULT);
-          setCentsOffset((prev) => (prev === null ? prev : null));
-        }
-
-        // Continue loop
-        animationFrameRef.current = requestAnimationFrame(detectLoop);
-      };
-
-      detectLoop();
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      alert(
-        `Failed to access microphone: ${errorMessage}. Please check browser permissions and ensure your microphone is connected.`
-      );
-      setIsListening(false);
-      setStatus("idle");
-    }
-  };
+  const {
+    isListening,
+    status,
+    ringDirection,
+    lockProgress,
+    isLocked,
+    waveSpeed,
+    centsOffset,
+    detectedNote,
+    startMicrophone,
+    stopMicrophone,
+    setTargetFromUser,
+  } = usePitchDetection({
+    targetNote,
+    octaveRange,
+    onTargetChange: setTargetNote,
+  });
 
   const handleOctaveChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const selection = event.target.value;
@@ -321,71 +66,14 @@ function App() {
 
     const range = { start: octave, end: octave };
     setOctaveSelection(selection);
-    octaveRangeRef.current = range;
-
-    if (correctTimeoutRef.current) {
-      clearTimeout(correctTimeoutRef.current);
-      correctTimeoutRef.current = null;
-    }
+    setOctaveRange(range);
 
     const newTarget = randomTargetNote(range);
-    setTargetNote(newTarget);
-    targetNoteRef.current = newTarget;
-    voterRef.current.reset();
-    setDetectedNote("");
-    setRingDirection("neutral");
-    resetLock();
-    setWaveSpeed(WAVE_SPEED_DEFAULT);
-    setCentsOffset(null);
-    setStatus(isListening ? "listening" : "idle");
-  };
-
-  /**
-   * Stop microphone and clean up resources
-   */
-  const stopMicrophone = () => {
-    // Stop animation frame
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-
-    // Stop media stream
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      mediaStreamRef.current = null;
-    }
-
-    // Close audio context
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(console.error);
-      audioContextRef.current = null;
-    }
-
-    // Clear timeout
-    if (correctTimeoutRef.current) {
-      clearTimeout(correctTimeoutRef.current);
-      correctTimeoutRef.current = null;
-    }
-
-    // Clear pitch detector and audio buffer
-    pitchDetectorRef.current = null;
-    audioBufferRef.current = null;
-
-    // Reset state
-    setIsListening(false);
-    setStatus("idle");
-    setDetectedNote("");
-    setRingDirection("neutral");
-    resetLock();
-    setWaveSpeed(WAVE_SPEED_DEFAULT);
-    setCentsOffset(null);
-    voterRef.current.reset();
+    setTargetFromUser(newTarget, isListening ? "listening" : "idle");
   };
 
   const playTargetNote = async () => {
     try {
-      hasUserGestureRef.current = true;
       if (referenceTone === "off") {
         return;
       }
@@ -404,7 +92,7 @@ function App() {
         await audioContext.resume();
       }
 
-      const frequency = midiToFrequency(targetNoteRef.current);
+      const frequency = midiToFrequency(targetNote);
       if (!frequency) return;
 
       const oscillator = audioContext.createOscillator();
@@ -475,8 +163,7 @@ function App() {
         playbackContextRef.current = null;
       }
     };
-  }, []);
-
+  }, [stopMicrophone]);
 
   // Get status text
   const getStatusText = (): string => {
@@ -500,6 +187,7 @@ function App() {
   };
 
   const targetNoteName = midiToNoteName(targetNote);
+  const targetNoteLabel = targetNoteName.replace(/-?\d+$/, "");
   const showDetectedNote = detectedNote.length > 0;
   const isDetectedMatch =
     showDetectedNote &&
@@ -515,15 +203,20 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <div className="brand-compact">
-          <span className="brand-name">Pitch Atelier</span>
-          <span
-            className={`mic-dot ${isListening ? "is-live" : ""}`}
-            aria-hidden="true"
-          />
-          <span className="sr-only">
-            {isListening ? "Microphone live" : "Microphone off"}
-          </span>
+        <div className="header-status-group">
+          <div className="brand-compact">
+            <span className="brand-name">Pitch Atelier</span>
+            <span
+              className={`mic-dot ${isListening ? "is-live" : ""}`}
+              aria-hidden="true"
+            />
+            <span className="sr-only">
+              {isListening ? "Microphone live" : "Microphone off"}
+            </span>
+          </div>
+          <div className="header-status" role="status" aria-live="polite">
+            {getStatusText()}
+          </div>
         </div>
         <div className="header-actions">
           {!isListening ? (
@@ -649,7 +342,15 @@ function App() {
           <div className="ring-core">
             <div className="note-wave" aria-hidden="true" />
             <div className="note-stack">
-              <div className="target-note">{targetNoteName}</div>
+              <button
+                type="button"
+                className="target-note"
+                onClick={playTargetNote}
+                disabled={isPlayingTarget || referenceTone === "off"}
+                aria-label="Play target note"
+              >
+                {targetNoteLabel}
+              </button>
               <div
                 className={`detected-note ${isDetectedMatch ? "is-match" : ""}`}
                 data-visible={showDetectedNote}
@@ -674,37 +375,15 @@ function App() {
             </div>
           </div>
         </div>
-        <p className="hero-caption">
-          Hold a steady tone to lock the match.
-        </p>
+        <p className="hero-caption">Hold a steady tone to lock the match.</p>
         <div className="hero-staff">
           <SheetMusicNote noteMidi={targetNote} scale={1.2} />
-        </div>
-        <div className="hero-actions">
-          <button
-            className="glass-button glass-button--primary"
-            type="button"
-            onClick={playTargetNote}
-            disabled={isPlayingTarget || referenceTone === "off"}
-          >
-            {referenceTone === "off"
-              ? "Reference tone off"
-              : isPlayingTarget
-                ? "Playing target..."
-                : "Play target note"}
-          </button>
-        </div>
-        <div className="hero-status" role="status" aria-live="polite">
-          {getStatusText()}
         </div>
       </main>
 
       <footer className="piano-footer">
         <div className="piano-board">
-          <PianoKeys
-            highlightedNote={targetNoteName}
-            octaveRange={DEFAULT_OCTAVE_RANGE}
-          />
+          <PianoKeys highlightedNote={targetNoteName} />
         </div>
       </footer>
     </div>

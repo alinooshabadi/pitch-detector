@@ -23,5 +23,8 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['aubiojs']
   },
-  assetsInclude: ['**/*.wasm']
+  assetsInclude: ['**/*.wasm'],
+  test: {
+    environment: 'jsdom'
+  }
 })
