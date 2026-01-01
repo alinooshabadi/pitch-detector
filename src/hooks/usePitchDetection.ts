@@ -1,5 +1,6 @@
 // @ts-expect-error - aubiojs ESM build doesn't have type definitions
 import aubio from "aubiojs/build/aubio.esm.js";
+import aubioWasmUrl from "aubiojs/build/aubio.esm.wasm?url";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   frequencyToMidi,
@@ -163,7 +164,10 @@ export function usePitchDetection({
       // Reinitialize aubio with the correct sample rate if it doesn't match
       if (!pitchDetectorRef.current) {
         try {
-          const aubioModule = await aubio();
+          const aubioModule = await aubio({
+            locateFile: (path: string) =>
+              path.endsWith(".wasm") ? aubioWasmUrl : path,
+          });
           const { Pitch } = aubioModule;
           const bufferSize = 2048;
           const hopSize = 512;
